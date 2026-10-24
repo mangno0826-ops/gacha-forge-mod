@@ -1,0 +1,4 @@
+# common navigation prefix to chapter 25 map
+NAV=(p:Claim p:Begin p:Close w:800 p:Close w:500 "p:Chapter" w:800 p:Close w:500 p:Chapter w:1000 p:Close w:600 'e:r.querySelector("[data-open-chapter=\"25\"] button").click();return 1' w:1500 p:Close w:500)
+MAT=(p:Claim p:Begin p:Close w:800 p:Close w:500 "p:Chapter" w:800 p:Close w:500 'e:[...r.querySelectorAll("button")].find(b=>/Materials/.test(b.textContent)).click();return 1' w:1500 p:Close w:600)
+FARM=("${MAT[@]}" 'e:[...r.querySelectorAll("button")].find(b=>/^NormalCP/.test(b.textContent.trim())).click();return 1' w:1500 p:Close w:500 'e:[...r.querySelectorAll("button")].find(b=>/^아린/.test(b.textContent.trim())).click();return 1' w:500 'e:[...r.querySelectorAll("button")].find(b=>/^\+Add/.test(b.textContent.trim())).click();return 1' w:600)

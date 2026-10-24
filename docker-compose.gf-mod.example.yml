@@ -1,0 +1,15 @@
+# Gacha Forge · 마개조 서버 패치 — Docker Compose 추가 파일 예시.
+# Marinara의 docker-compose.yml 옆에 docker-compose.gf-mod.yml 이름으로 두고,
+# 기존에 쓰던 모든 -f 파일 뒤에 -f docker-compose.gf-mod.yml 을 더해서 실행합니다.
+# 서비스 이름(marinara)은 공식 docker-compose.yml 기준입니다. 다르면 맞게 바꾸세요.
+services:
+  marinara:
+    volumes:
+      - ./gf-mod/gf-mod-runtime.cjs:/app/gf-mod-runtime.cjs:ro
+    environment:
+      # 이미 NODE_OPTIONS로 다른 --require 패치(한글화, CG, 커스터마이저, webp)를 쓰고 있다면
+      # 이 줄을 쓰지 말고, 기존 NODE_OPTIONS 값 끝에 " --require=/app/gf-mod-runtime.cjs" 를 이어 붙이세요.
+      NODE_OPTIONS: "--require=/app/gf-mod-runtime.cjs"
+      # "0"으로 바꾸면 끕니다.
+      GF_MOD_RANK_REFILL: "1"   # 지휘관 랭크가 오르면 행동력(Vigor) 가득 채우기
+      GF_MOD_AETHER: "1"        # 상점 '에테르 충전소'
