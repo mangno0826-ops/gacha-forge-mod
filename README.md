@@ -27,7 +27,11 @@
 
 GitHub 확장 관리자에 이 저장소 주소를 넣어 설치합니다. 게임 화면 안에 들어가야 해서 **Full page access** 권한을 씁니다.
 
-### 2. 서버 패치 (Docker)
+### 2. 서버 패치 — systemd 서버
+
+root로 SSH 접속 후 `curl -fsSL https://raw.githubusercontent.com/mangno0826-ops/gacha-forge-mod/main/install-server.sh | bash` 한 줄이면 커스터마이저·webp 패치까지 같이 설치됩니다. 자세한 내용은 [INSTALL-ALL.md](INSTALL-ALL.md).
+
+### 2-1. 서버 패치 (Docker)
 
 Marinara의 `docker-compose.yml`이 있는 폴더에서:
 

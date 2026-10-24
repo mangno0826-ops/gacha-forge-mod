@@ -1,5 +1,36 @@
 # 한 번에 설치하기: 마개조 + 커스터마이저 + webp 패치
 
+## 말랑나라가 시스템 서비스(systemd)로 돌아가는 서버 — 기영님 서버는 이쪽
+
+SSH로 서버에 root로 들어간 뒤 **아래 한 줄**을 붙여 넣으세요.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mangno0826-ops/gacha-forge-mod/main/install-server.sh | bash
+```
+
+스크립트가 알아서 이렇게 합니다.
+
+1. `marinara` 서비스와 Node 버전(22.15 이상 필요)을 확인합니다.
+2. 지금 서비스 설정을 `/opt/gf-patches/backup-<시각>/`에 백업합니다.
+3. 마개조, 커스터마이저 1.8.13, webp 패치 파일을 `/opt/gf-patches/`에 받습니다.
+4. 지금 쓰는 `NODE_OPTIONS`(CG 패치 등)는 **그대로 두고** 새 패치를 뒤에 이어 붙인 설정 조각을 만듭니다.
+5. 서비스를 다시 시작합니다. 제대로 안 뜨면 **자동으로 원래대로 되돌립니다.**
+
+끝나면 브라우저에서 가챠포지를 한 번 열고 확인하세요.
+
+```bash
+bash /opt/gf-patches/install-server.sh --check      # 패치가 적용됐는지 로그 보기
+bash /opt/gf-patches/install-server.sh --uninstall  # 전부 빼고 원래대로
+```
+
+`--check`에서 `[gf-mod] ... applied 2 edits`, `[gf-customizer] applied 14 edits`, `[gallery-webp] 설치됨`이 보이면 성공입니다. 커스터마이저의 글리머 교환 구매는 켜진 상태로 설치됩니다.
+
+이미 쌓인 PNG를 WebP로 바꾸는 작업(선택)은 서버를 꺼야 해서 자동으로 하지 않습니다. 필요하면 말씀해 주세요.
+
+---
+
+## Docker로 돌리는 서버
+
 말랑나라 2.5.1 · 가챠포지 1.8.13 기준입니다. 서버(Docker)에 SSH로 들어가서 순서대로 붙여 넣으면 됩니다. 아래 경로는 `/root/Marinara-Engine` 기준이니, 다르면 `docker-compose.yml`이 있는 폴더로 바꿔 주세요.
 
 ## 0. 지금 상태 확인과 백업
