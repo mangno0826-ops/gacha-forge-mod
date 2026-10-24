@@ -124,9 +124,14 @@ for f in ${ENV_FILES}; do
     die "NODE_OPTIONS is set in ${f}, so auto install stopped. Send me the output of: systemctl cat ${SERVICE}"
   fi
 done
+# A patch that is already wired in (e.g. webp installed by hand) is kept as is, not added twice.
+ADD=()
 for r in "${REQUIRES[@]}"; do
-  case " ${BASE_OPTS} " in *"${r##*/}"*) die "${r##*/} is already installed at another path. Send me the output of: systemctl cat ${SERVICE}" ;; esac
+  have=""
+  for tok in ${BASE_OPTS}; do case "${tok}" in *"/${r##*/}") have="${tok#--require=}" ;; esac; done
+  if [ -n "${have}" ]; then ok "${r##*/} already installed (${have}), keeping it"; else ADD+=("${r}"); fi
 done
+[ "${#ADD[@]}" -gt 0 ] || die "All patches are already installed. Nothing to do."
 
 # ── 2. 백업 ────────────────────────────────────────────────────────
 say "2/5 Backing up current service config"
@@ -162,7 +167,11 @@ ok "${DIR}"
 # ── 4. 설정 조각 쓰기 ──────────────────────────────────────────────
 say "4/5 Wiring patches into the service (keeping existing NODE_OPTIONS)"
 NEW_OPTS="${BASE_OPTS}"
-for r in "${REQUIRES[@]}"; do NEW_OPTS="${NEW_OPTS:+${NEW_OPTS} }--require=${r}"; done
+for r in "${ADD[@]}"; do NEW_OPTS="${NEW_OPTS:+${NEW_OPTS} }--require=${r}"; done
+CUST_ENV=""
+case " ${ADD[*]} " in *gf-customizer-runtime.cjs*) CUST_ENV="Environment=\"GF_CUSTOMIZER_EDITS_PATH=${DIR}/gf-customizer-edits.json\"
+Environment=\"GF_CUSTOMIZER_CONFIG_FILE=${DIR}/data/gacha-customizer-settings.json\"
+Environment=\"GF_CUSTOMIZER_ENABLE_EXCHANGE=1\"" ;; esac
 OLD_DROPIN=""
 [ -f "${DROPIN}" ] && OLD_DROPIN="$(cat "${DROPIN}")"
 mkdir -p "${DROPIN_DIR}"
@@ -170,9 +179,7 @@ cat >"${DROPIN}" <<EOF
 # gacha-forge-mod install-server.sh ${STAMP}. 지우면 패치가 빠집니다: bash ${DIR}/install-server.sh --uninstall
 [Service]
 Environment="NODE_OPTIONS=${NEW_OPTS}"
-Environment="GF_CUSTOMIZER_EDITS_PATH=${DIR}/gf-customizer-edits.json"
-Environment="GF_CUSTOMIZER_CONFIG_FILE=${DIR}/data/gacha-customizer-settings.json"
-Environment="GF_CUSTOMIZER_ENABLE_EXCHANGE=1"
+${CUST_ENV}
 Environment="GF_MOD_RANK_REFILL=1"
 Environment="GF_MOD_AETHER=1"
 EOF
