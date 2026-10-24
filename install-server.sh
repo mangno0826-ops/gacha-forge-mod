@@ -26,37 +26,37 @@ CUST_BASE="https://raw.githubusercontent.com/tlsiddl/gacha-forge-customizer/main
 WEBP_BASE="https://raw.githubusercontent.com/boricha417/marinara-global-gallery-webp/main"
 REQUIRES=("${DIR}/gf-customizer-runtime.cjs" "${DIR}/gf-mod-runtime.cjs" "${DIR}/webp-upload-runtime.cjs")
 
-say()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
-ok()   { printf '  \033[32m✔ %s\033[0m\n' "$*"; }
+say()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32mOK %s\033[0m\n' "$*"; }
 warn() { printf '  \033[33m! %s\033[0m\n' "$*"; }
-die()  { printf '\n\033[1;31m✘ %s\033[0m\n' "$*"; exit 1; }
+die()  { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*"; exit 1; }
 
-[ "$(id -u)" = 0 ] || die "root로 실행해 주세요."
-command -v systemctl >/dev/null || die "systemctl이 없습니다. 이 스크립트는 systemd 서버용입니다."
-systemctl cat "${SERVICE}" >/dev/null 2>&1 || die "'${SERVICE}' 서비스를 찾지 못했습니다."
+[ "$(id -u)" = 0 ] || die "Run as root."
+command -v systemctl >/dev/null || die "systemctl not found. This script is for systemd servers."
+systemctl cat "${SERVICE}" >/dev/null 2>&1 || die "Service '${SERVICE}' not found."
 
 show() { systemctl show "${SERVICE}" -p "$1" --value 2>/dev/null || true; }
 
 check() {
-  say "패치 상태 확인 (마지막 서비스 시작 이후 로그)"
+  say "Patch status (log since last service start)"
   local since
   since="$(show ActiveEnterTimestamp | awk '{print $2" "$3}')"
   journalctl -u "${SERVICE}" --since "${since:-10 min ago}" --no-pager 2>/dev/null \
     | grep -E "gf-mod|gf-customizer|gallery-webp|gacha-cg" | tail -n 20 || true
   echo
-  echo "  'applied ... edits'와 'gallery-webp] 설치됨'이 보이면 성공입니다."
-  echo "  'hook registered'만 있고 applied가 없으면, 가챠포지를 브라우저에서 한 번 연 뒤 다시 확인하세요."
-  echo "  'fail closed'나 'signature mismatch'가 보이면 그 패치만 꺼진 것이고 게임은 정상입니다."
+  echo "  Success = lines with 'applied ... edits' and a 'gallery-webp]' line."
+  echo "  No 'applied' yet? Open Gacha Forge in the browser once, then run --check again."
+  echo "  'fail closed' / 'signature mismatch' = only that patch is off; the game still works."
 }
 
 uninstall() {
-  say "설치한 패치를 서비스 설정에서 뺍니다"
-  if [ -f "${DROPIN}" ]; then rm -f "${DROPIN}"; ok "${DROPIN} 삭제"; else warn "설치된 설정 조각이 없습니다."; fi
+  say "Removing the patches from the service"
+  if [ -f "${DROPIN}" ]; then rm -f "${DROPIN}"; ok "removed ${DROPIN}"; else warn "No drop-in installed."; fi
   systemctl daemon-reload
   systemctl restart "${SERVICE}"
   sleep 3
-  systemctl is-active --quiet "${SERVICE}" && ok "서비스가 다시 실행 중입니다." || die "서비스가 시작되지 않았습니다: journalctl -u ${SERVICE} -n 50"
-  echo "  /opt/gf-patches 폴더는 남겨 두었습니다. 필요 없으면 rm -rf /opt/gf-patches"
+  systemctl is-active --quiet "${SERVICE}" && ok "Service is running again." || die "Service did not start: journalctl -u ${SERVICE} -n 50"
+  echo "  /opt/gf-patches was kept. Delete it with: rm -rf /opt/gf-patches"
 }
 
 case "${1:-}" in
@@ -64,34 +64,44 @@ case "${1:-}" in
   --uninstall) uninstall; exit 0 ;;
 esac
 
-# ── 1. 서비스와 Node 확인 ──────────────────────────────────────────
-say "1/5 서비스와 Node 확인"
-systemctl is-active --quiet "${SERVICE}" || warn "'${SERVICE}' 서비스가 지금 꺼져 있습니다. 설치 후 켭니다."
-EXEC="$(show ExecStart)"
-NODE_BIN="$(printf '%s' "${EXEC}" | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1)"
-if [ -z "${NODE_BIN}" ] || ! "${NODE_BIN}" -v >/dev/null 2>&1; then NODE_BIN="$(command -v node || true)"; fi
-# ExecStart가 npm/pnpm/스크립트일 수 있으니, 실행 중인 프로세스의 node도 봅니다.
-PID="$(show MainPID)"
-if [ -n "${PID}" ] && [ "${PID}" != 0 ]; then
-  RUN_BIN="$(readlink -f "/proc/${PID}/exe" 2>/dev/null || true)"
-  CHILD="$(pgrep -P "${PID}" -f node 2>/dev/null | head -n1 || true)"
-  [ -n "${CHILD}" ] && RUN_BIN="$(readlink -f "/proc/${CHILD}/exe" 2>/dev/null || echo "${RUN_BIN}")"
-  case "${RUN_BIN}" in *node*) NODE_BIN="${RUN_BIN}" ;; esac
+# ── 1. Service and Node ───────────────────────────────────────────
+say "1/5 Checking service and Node"
+systemctl is-active --quiet "${SERVICE}" || warn "'${SERVICE}' is stopped now. It will be started after install."
+PID="$(show MainPID)"; [ "${PID}" = 0 ] && PID=""
+# ExecStart may be pnpm/npm/a shell script, so walk the process tree and find the real node.
+descendants() {
+  local q="$1" kids k
+  echo "${q}"
+  kids="$(awk -v pp="${q}" '{ sub(/^.*\) /, ""); if ($2 == pp) print FILENAME }' /proc/[0-9]*/stat 2>/dev/null | sed 's#/proc/\([0-9]*\)/stat#\1#')"
+  for k in ${kids}; do descendants "${k}"; done
+}
+is_node() { case "$(basename "$1")" in node|node[0-9]*|nodejs) "$1" -v 2>/dev/null | grep -q '^v[0-9]' ;; *) return 1 ;; esac; }
+NODE_BIN=""; NODE_PID=""
+if [ -n "${PID}" ]; then
+  for p in $(descendants "${PID}"); do
+    b="$(readlink -f "/proc/${p}/exe" 2>/dev/null || true)"
+    if [ -n "${b}" ] && is_node "${b}"; then NODE_BIN="${b}"; NODE_PID="${p}"; fi
+  done
 fi
-[ -n "${NODE_BIN}" ] || die "Node 실행 파일을 찾지 못했습니다."
+if [ -z "${NODE_BIN}" ]; then
+  for c in $(show ExecStart | grep -o 'path=[^ ;]*' | cut -d= -f2) $(command -v node 2>/dev/null) /usr/local/bin/node /usr/bin/node /root/node22*/bin/node /opt/node*/bin/node; do
+    [ -x "${c}" ] && is_node "${c}" && { NODE_BIN="$(readlink -f "${c}")"; break; }
+  done
+fi
+[ -n "${NODE_BIN}" ] || die "Could not find the node binary. Send me the output of: systemctl cat ${SERVICE}"
 NODE_VER="$("${NODE_BIN}" -v)"
 ok "Node ${NODE_VER} (${NODE_BIN})"
 IFS=. read -r MAJ MIN _ <<<"${NODE_VER#v}"
 if [ "${MAJ}" -lt 22 ] || { [ "${MAJ}" = 22 ] && [ "${MIN}" -lt 15 ]; }; then
-  die "Node 22.15 이상이 필요합니다 (지금 ${NODE_VER}). 패치들이 module.registerHooks를 씁니다."
+  die "Node 22.15+ is required (found ${NODE_VER}). The patches use module.registerHooks."
 fi
 SVC_USER="$(show User)"; SVC_USER="${SVC_USER:-root}"
-ok "서비스 사용자: ${SVC_USER}"
+ok "Service user: ${SVC_USER}"
 
 # 지금 NODE_OPTIONS: 실행 중인 프로세스의 실제 값이 가장 정확합니다.
 CUR_OPTS=""
-for p in "${PID}" "${CHILD:-}"; do
-  [ -n "${p}" ] && [ "${p}" != 0 ] && [ -r "/proc/${p}/environ" ] || continue
+for p in "${NODE_PID}" "${PID}"; do
+  [ -n "${p}" ] && [ -r "/proc/${p}/environ" ] || continue
   v="$(tr '\0' '\n' <"/proc/${p}/environ" | sed -n 's/^NODE_OPTIONS=//p' | head -n1)"
   [ -n "${v}" ] && CUR_OPTS="${v}" && break
 done
@@ -106,20 +116,20 @@ for tok in ${CUR_OPTS}; do
     *) BASE_OPTS="${BASE_OPTS:+${BASE_OPTS} }${tok}" ;;
   esac
 done
-ok "지금 NODE_OPTIONS: ${BASE_OPTS:-(없음)}"
+ok "Current NODE_OPTIONS: ${BASE_OPTS:-(none)}"
 # EnvironmentFile에 NODE_OPTIONS가 있으면 그쪽이 Environment보다 우선이라 설정 조각이 안 먹습니다.
 ENV_FILES="$(systemctl cat "${SERVICE}" 2>/dev/null | sed -n 's/^EnvironmentFile=-\{0,1\}//p')"
 for f in ${ENV_FILES}; do
   if [ -f "${f}" ] && grep -q '^ *NODE_OPTIONS=' "${f}"; then
-    die "NODE_OPTIONS가 ${f} 파일에 들어 있어서 자동 설치를 멈췄습니다. 'systemctl cat ${SERVICE}' 결과를 보내 주시면 맞춰 드릴게요."
+    die "NODE_OPTIONS is set in ${f}, so auto install stopped. Send me the output of: systemctl cat ${SERVICE}"
   fi
 done
 for r in "${REQUIRES[@]}"; do
-  case " ${BASE_OPTS} " in *"${r##*/}"*) die "${r##*/}가 이미 다른 경로로 설치되어 있습니다. 'systemctl cat ${SERVICE}' 결과를 보내 주세요." ;; esac
+  case " ${BASE_OPTS} " in *"${r##*/}"*) die "${r##*/} is already installed at another path. Send me the output of: systemctl cat ${SERVICE}" ;; esac
 done
 
 # ── 2. 백업 ────────────────────────────────────────────────────────
-say "2/5 지금 서비스 설정 백업"
+say "2/5 Backing up current service config"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BK="${DIR}/backup-${STAMP}"
 mkdir -p "${BK}"
@@ -129,10 +139,10 @@ printf '%s\n' "${CUR_OPTS}" >"${BK}/NODE_OPTIONS.txt"
 ok "${BK}"
 
 # ── 3. 파일 받기 ───────────────────────────────────────────────────
-say "3/5 패치 파일 받기"
+say "3/5 Downloading patch files"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
-fetch() { curl -fsSL --retry 3 "$1" -o "${TMP}/$2" || die "내려받기 실패: $1"; [ -s "${TMP}/$2" ] || die "빈 파일: $1"; }
+fetch() { curl -fsSL --retry 3 "$1" -o "${TMP}/$2" || die "Download failed: $1"; [ -s "${TMP}/$2" ] || die "Empty file: $1"; }
 fetch "${MOD_URL}" gf-mod-runtime.cjs
 fetch "${CUST_BASE}/gf-customizer-runtime.cjs" gf-customizer-runtime.cjs
 fetch "${CUST_BASE}/gf-customizer-edits.json" gf-customizer-edits.json
@@ -140,9 +150,9 @@ fetch "${WEBP_BASE}/webp-upload-runtime.cjs" webp-upload-runtime.cjs
 fetch "${WEBP_BASE}/global-gallery-png-to-webp.mjs" global-gallery-png-to-webp.mjs
 curl -fsSL --retry 3 "${SELF_URL}" -o "${TMP}/install-server.sh" 2>/dev/null || cp "$0" "${TMP}/install-server.sh" 2>/dev/null || true
 for f in gf-mod-runtime.cjs gf-customizer-runtime.cjs webp-upload-runtime.cjs; do
-  "${NODE_BIN}" --check "${TMP}/${f}" || die "${f} 문법 검사 실패"
+  "${NODE_BIN}" --check "${TMP}/${f}" || die "${f} failed syntax check"
 done
-"${NODE_BIN}" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "${TMP}/gf-customizer-edits.json" || die "커스터마이저 JSON이 깨져 있습니다."
+"${NODE_BIN}" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "${TMP}/gf-customizer-edits.json" || die "Customizer JSON is broken."
 install -d -m 755 "${DIR}" "${DIR}/data"
 install -m 644 "${TMP}"/*.cjs "${TMP}"/*.json "${TMP}"/*.mjs "${DIR}/"
 [ -s "${TMP}/install-server.sh" ] && install -m 755 "${TMP}/install-server.sh" "${DIR}/install-server.sh"
@@ -150,7 +160,7 @@ chown "${SVC_USER}" "${DIR}/data" 2>/dev/null || true
 ok "${DIR}"
 
 # ── 4. 설정 조각 쓰기 ──────────────────────────────────────────────
-say "4/5 서비스에 패치 연결 (기존 NODE_OPTIONS 유지)"
+say "4/5 Wiring patches into the service (keeping existing NODE_OPTIONS)"
 NEW_OPTS="${BASE_OPTS}"
 for r in "${REQUIRES[@]}"; do NEW_OPTS="${NEW_OPTS:+${NEW_OPTS} }--require=${r}"; done
 OLD_DROPIN=""
@@ -170,24 +180,24 @@ ok "${DROPIN}"
 echo "  NODE_OPTIONS=${NEW_OPTS}"
 
 # ── 5. 다시 시작 ───────────────────────────────────────────────────
-say "5/5 서비스 다시 시작"
+say "5/5 Restarting the service"
 rollback() {
-  warn "서비스가 제대로 뜨지 않아 원래 설정으로 되돌립니다."
+  warn "Service did not come up. Restoring the previous config."
   if [ -n "${OLD_DROPIN}" ]; then printf '%s\n' "${OLD_DROPIN}" >"${DROPIN}"; else rm -f "${DROPIN}"; fi
   systemctl daemon-reload
   systemctl restart "${SERVICE}" || true
   sleep 5
   journalctl -u "${SERVICE}" -n 30 --no-pager || true
-  die "설치를 취소했습니다. 위 로그를 캡처해서 보내 주세요."
+  die "Install rolled back. Screenshot the log above and send it."
 }
 systemctl daemon-reload
 systemctl restart "${SERVICE}" || rollback
 for _ in $(seq 1 20); do sleep 2; systemctl is-active --quiet "${SERVICE}" && break; done
 sleep 6
 systemctl is-active --quiet "${SERVICE}" || rollback
-ok "서비스 실행 중"
+ok "Service is running"
 check
 echo
-echo "다음: 브라우저에서 가챠포지를 열고 상점에 '에테르 충전소'가 보이는지 확인하세요."
-echo "      서버 로그를 다시 보려면:  bash ${DIR}/install-server.sh --check"
-echo "      되돌리려면:              bash ${DIR}/install-server.sh --uninstall"
+echo "Next: open Gacha Forge in the browser, then run --check below."
+echo "      Check:      bash ${DIR}/install-server.sh --check"
+echo "      Uninstall:  bash ${DIR}/install-server.sh --uninstall"
